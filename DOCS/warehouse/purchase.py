@@ -26,6 +26,7 @@ def fetch_and_flatten(data_url):
         response.raise_for_status()
         data = response.json()
 
+        # Извлечение списка
         if isinstance(data, dict):
             for key, value in data.items():
                 if isinstance(value, list):
@@ -36,33 +37,24 @@ def fetch_and_flatten(data_url):
         elif not isinstance(data, list):
             raise ValueError("❌ Формат ответа неизвестен")
 
-        return_df = pd.json_normalize(data, sep="_", max_level=1)
+        # Главная таблица: покупки
+        purchase_df = pd.json_normalize(data, sep="_", max_level=1)
 
-        return_products_list = []
-        for entry in data:
-            return_id = entry.get("deal_id") or entry.get("movement_id")
-            for product in entry.get("return_products", []):
-                product["return_id"] = return_id
-                return_products_list.append(product)
-        return_products_df = pd.DataFrame(return_products_list)
+        # Вложенная таблица: purchase_items
+        items_list = []
+        for purchase in data:
+            purchase_id = purchase.get("purchase_id")
+            for item in purchase.get("purchase_items", []):
+                item["purchase_id"] = purchase_id
+                items_list.append(item)
+        purchase_items_df = pd.DataFrame(items_list)
 
-        details_list = []
-        for product in return_products_list:
-            product_id = product.get("product_unit_id")
-            return_id = product.get("return_id")
-            for detail in product.get("details", []):
-                detail["product_id"] = product_id
-                detail["return_id"] = return_id
-                details_list.append(detail)
-        details_df = pd.DataFrame(details_list)
-
-        print(f"✅ Получено: {len(return_df)} возвратов, {len(return_products_df)} товаров, {len(details_df)} деталей")
+        print(f"✅ Получено: {len(purchase_df)} покупок, {len(purchase_items_df)} товаров")
 
         df_dict = {
             name: df for name, df in {
-                "Purchase_return": return_df,
-                "Purchase_returnproducts": return_products_df,
-                "Purchase_details": details_df
+                "Purchase": purchase_df,
+                "Purchase_items": purchase_items_df
             }.items() if not df.empty and not df.columns.empty
         }
 
@@ -71,6 +63,7 @@ def fetch_and_flatten(data_url):
     except Exception as e:
         print(f"❌ Ошибка при загрузке: {e}")
         return None
+
 
 
 def upload_to_sql(df_dict):

@@ -36,37 +36,38 @@ def fetch_and_flatten(data_url):
         elif not isinstance(data, list):
             raise ValueError("❌ Формат ответа неизвестен")
 
-        return_df = pd.json_normalize(data, sep="_", max_level=1)
+        # Основная таблица — input без вложенных полей
+        input_df = pd.json_normalize(
+            data,
+            sep="_",
+            max_level=1
+        ).drop(columns=["input_items", "supplier_codes"], errors="ignore")
 
-        return_products_list = []
-        for entry in data:
-            return_id = entry.get("deal_id") or entry.get("movement_id")
-            for product in entry.get("return_products", []):
-                product["return_id"] = return_id
-                return_products_list.append(product)
-        return_products_df = pd.DataFrame(return_products_list)
+        # Отдельно — input_items
+        input_items_list = []
+        suppliers_list = []
 
-        details_list = []
-        for product in return_products_list:
-            product_id = product.get("product_unit_id")
-            return_id = product.get("return_id")
-            for detail in product.get("details", []):
-                detail["product_id"] = product_id
-                detail["return_id"] = return_id
-                details_list.append(detail)
-        details_df = pd.DataFrame(details_list)
+        for row in data:
+            input_id = row.get("input_id")
+            supplier_codes = row.get("supplier_codes", [])
 
-        print(f"✅ Получено: {len(return_df)} возвратов, {len(return_products_df)} товаров, {len(details_df)} деталей")
+            # Если список есть, но даже пустой — всё равно сохраняем input_id
+            if supplier_codes:
+                for sup in supplier_codes:
+                    sup = sup or {}  # если None, превращаем в пустой dict
+                    sup["input_id"] = input_id
+                    suppliers_list.append(sup)
 
-        df_dict = {
-            name: df for name, df in {
-                "ReceiptsWH_return": return_df,
-                "ReceiptsWH_returnproducts": return_products_df,
-                "ReceiptsWH_details": details_df
-            }.items() if not df.empty and not df.columns.empty
+        input_items_df = pd.DataFrame(input_items_list)
+        suppliers_df = pd.DataFrame(suppliers_list)
+
+        print(f"✅ Получено: {len(input_df)} записей, {len(input_items_df)} товаров, {len(suppliers_df)} поставщиков")
+
+        return {
+            "ReceiptsWH_inputs": input_df,
+            "ReceiptsWH_input_items": input_items_df,
+            "ReceiptsWH_suppliers": suppliers_df
         }
-
-        return df_dict
 
     except Exception as e:
         print(f"❌ Ошибка при загрузке: {e}")
@@ -86,6 +87,9 @@ def upload_to_sql(df_dict):
         engine = create_engine(f"mssql+pyodbc:///?odbc_connect={params}")
 
         for table_name, df in df_dict.items():
+            if df.empty or df.columns.empty:
+                print(f"⏭ Таблица {table_name} пуста или без столбцов — пропущено.")
+                continue
             print(f"📥 Загрузка в таблицу: {table_name} ({len(df)} строк)")
             df.to_sql(table_name, con=engine, index=False, if_exists="replace")
         print("✅ Все данные успешно записаны в SQL Server.")

@@ -26,6 +26,7 @@ def fetch_and_flatten(data_url):
         response.raise_for_status()
         data = response.json()
 
+        # Определяем список возвратов
         if isinstance(data, dict):
             for key, value in data.items():
                 if isinstance(value, list):
@@ -36,33 +37,24 @@ def fetch_and_flatten(data_url):
         elif not isinstance(data, list):
             raise ValueError("❌ Формат ответа неизвестен")
 
+        # Основная таблица: возвраты
         return_df = pd.json_normalize(data, sep="_", max_level=1)
 
-        return_products_list = []
+        # Вложенная таблица: товары возврата
+        return_items_list = []
         for entry in data:
-            return_id = entry.get("deal_id") or entry.get("movement_id")
-            for product in entry.get("return_products", []):
-                product["return_id"] = return_id
-                return_products_list.append(product)
-        return_products_df = pd.DataFrame(return_products_list)
+            return_id = entry.get("return_id")
+            for item in entry.get("return_items", []):
+                item["return_id"] = return_id
+                return_items_list.append(item)
+        return_items_df = pd.DataFrame(return_items_list)
 
-        details_list = []
-        for product in return_products_list:
-            product_id = product.get("product_unit_id")
-            return_id = product.get("return_id")
-            for detail in product.get("details", []):
-                detail["product_id"] = product_id
-                detail["return_id"] = return_id
-                details_list.append(detail)
-        details_df = pd.DataFrame(details_list)
-
-        print(f"✅ Получено: {len(return_df)} возвратов, {len(return_products_df)} товаров, {len(details_df)} деталей")
+        print(f"✅ Получено: {len(return_df)} возвратов, {len(return_items_df)} товаров")
 
         df_dict = {
             name: df for name, df in {
                 "suppliers_return": return_df,
-                "suppliers_returnproducts": return_products_df,
-                "suppliers_details": details_df
+                "suppliers_return_items": return_items_df
             }.items() if not df.empty and not df.columns.empty
         }
 

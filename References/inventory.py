@@ -18,60 +18,50 @@ def get_cookies_from_browser(url):
     return {cookie['name']: cookie['value'] for cookie in cookies}
 
 
-def fetch_and_flatten(data_url):
+def fetch_and_flatten(data_url_inventory, data_url_groups):
     try:
         cookies = get_cookies_from_browser("https://smartup.online")
         print("⬇️ Загружаем данные...")
-        response = requests.get(data_url, cookies=cookies)
-        response.raise_for_status()
-        data = response.json()
 
-        if isinstance(data, dict):
-            for key, value in data.items():
-                if isinstance(value, list):
-                    data = value
-                    break
-            else:
-                raise ValueError("❌ Не найден список в структуре JSON")
-        elif not isinstance(data, list):
-            raise ValueError("❌ Формат ответа неизвестен")
+        # Получаем только нужные данные
+        inventory_data = requests.get(data_url_inventory, cookies=cookies).json()
+        group_data = requests.get(data_url_groups, cookies=cookies).json()
 
-        return_df = pd.json_normalize(data, sep="_", max_level=1)
+        # Извлекаем только нужное из inventory
+        flat_rows = []
+        for item in inventory_data.get("inventory", []):
+            product_id = item.get("product_id")
+            code = item.get("code")
+            groups = item.get("groups", [])
+            for group in groups:
+                flat_rows.append({
+                    "product_id": product_id,
+                    "code": code,
+                    "group_code": group.get("group_code"),
+                    "type_id": group.get("type_id")
+                })
+        inventory_groups_df = pd.DataFrame(flat_rows)
 
-        return_products_list = []
-        for entry in data:
-            return_id = entry.get("deal_id") or entry.get("movement_id") or entry.get("visit_id") or entry.get("id")
-            for product in entry.get("return_products", []):
-                product["return_id"] = return_id
-                return_products_list.append(product)
-        return_products_df = pd.DataFrame(return_products_list)
+        # Расплющиваем product_groups
+        product_group_df = pd.json_normalize(group_data.get("product_groups", []))[
+            ["product_type_id", "product_group_code", "product_group_name"]
+        ]
 
-        details_list = []
-        for product in return_products_list:
-            product_id = product.get("product_unit_id")
-            return_id = product.get("return_id")
-            for detail in product.get("details", []):
-                detail["product_id"] = product_id
-                detail["return_id"] = return_id
-                details_list.append(detail)
-        details_df = pd.DataFrame(details_list)
+        # Объединение по type_id
+        merged_df = pd.merge(
+            inventory_groups_df,
+            product_group_df,
+            how="left",
+            left_on="type_id",
+            right_on="product_type_id"
+        )
 
-        print(f"✅ Получено: {len(return_df)} возвратов, {len(return_products_df)} товаров, {len(details_df)} деталей")
-
-        df_dict = {
-            name: df for name, df in {
-                "inventory_return": return_df,
-                "inventory_returnproducts": return_products_df,
-                "inventory_details": details_df
-            }.items() if not df.empty and not df.columns.empty
-        }
-
-        return df_dict
+        print(f"✅ Объединено: {len(merged_df)} строк")
+        return {"ProductType_Merged": merged_df}
 
     except Exception as e:
-        print(f"❌ Ошибка при загрузке: {e}")
+        print(f"❌ Ошибка при загрузке и объединении: {e}")
         return None
-
 
 def upload_to_sql(df_dict):
     try:
@@ -88,6 +78,7 @@ def upload_to_sql(df_dict):
         for table_name, df in df_dict.items():
             print(f"📥 Загрузка в таблицу: {table_name} ({len(df)} строк)")
             df.to_sql(table_name, con=engine, index=False, if_exists="replace")
+
         print("✅ Все данные успешно записаны в SQL Server.")
 
     except Exception as e:
@@ -98,7 +89,9 @@ def upload_to_sql(df_dict):
 
 
 if __name__ == "__main__":
-    DATA_URL = "https://smartup.online/b/anor/mxsx/mr/inventory$export"
-    df_dict = fetch_and_flatten(DATA_URL)
+    DATA_URL_INVENTORY = "https://smartup.online/b/anor/mxsx/mr/inventory$export"
+    DATA_URL_GROUPS = "https://smartup.online/b/anor/mxsx/mr/product_group$export"
+
+    df_dict = fetch_and_flatten(DATA_URL_INVENTORY, DATA_URL_GROUPS)
     if df_dict:
         upload_to_sql(df_dict)

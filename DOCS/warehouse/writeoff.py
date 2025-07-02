@@ -26,6 +26,7 @@ def fetch_and_flatten(data_url):
         response.raise_for_status()
         data = response.json()
 
+        # Определяем список списаний
         if isinstance(data, dict):
             for key, value in data.items():
                 if isinstance(value, list):
@@ -36,33 +37,24 @@ def fetch_and_flatten(data_url):
         elif not isinstance(data, list):
             raise ValueError("❌ Формат ответа неизвестен")
 
-        return_df = pd.json_normalize(data, sep="_", max_level=1)
+        # Основная таблица: списания
+        writeoff_df = pd.json_normalize(data, sep="_", max_level=1)
 
-        return_products_list = []
+        # Вложенная таблица: товары списания
+        writeoff_items_list = []
         for entry in data:
-            writeoff_id = entry.get("deal_id") or entry.get("movement_id")
-            for product in entry.get("return_products", []):
-                product["writeoff_id"] = writeoff_id
-                return_products_list.append(product)
-        return_products_df = pd.DataFrame(return_products_list)
+            writeoff_id = entry.get("writeoff_id")
+            for item in entry.get("writeoff_items", []):
+                item["writeoff_id"] = writeoff_id
+                writeoff_items_list.append(item)
+        writeoff_items_df = pd.DataFrame(writeoff_items_list)
 
-        details_list = []
-        for product in return_products_list:
-            product_id = product.get("product_unit_id")
-            writeoff_id = product.get("writeoff_id")
-            for detail in product.get("details", []):
-                detail["product_id"] = product_id
-                detail["writeoff_id"] = writeoff_id
-                details_list.append(detail)
-        details_df = pd.DataFrame(details_list)
-
-        print(f"✅ Получено: {len(return_df)} списаний, {len(return_products_df)} товаров, {len(details_df)} деталей")
+        print(f"✅ Получено: {len(writeoff_df)} списаний, {len(writeoff_items_df)} товаров")
 
         df_dict = {
             name: df for name, df in {
-                "writeoff_return": return_df,
-                "writeoff_returnproducts": return_products_df,
-                "writeoff_details": details_df
+                "writeoff": writeoff_df,
+                "writeoff_items": writeoff_items_df
             }.items() if not df.empty and not df.columns.empty
         }
 
@@ -71,6 +63,7 @@ def fetch_and_flatten(data_url):
     except Exception as e:
         print(f"❌ Ошибка при загрузке: {e}")
         return None
+
 
 
 def upload_to_sql(df_dict):

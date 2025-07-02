@@ -36,33 +36,34 @@ def fetch_and_flatten(data_url):
         elif not isinstance(data, list):
             raise ValueError("❌ Формат ответа неизвестен")
 
-        return_df = pd.json_normalize(data, sep="_", max_level=1)
+        # Основная таблица
+        main_df = pd.json_normalize(data, sep="_", max_level=1)
 
-        return_products_list = []
-        for entry in data:
-            return_id = entry.get("deal_id") or entry.get("movement_id") or entry.get("visit_id") or entry.get("id")
-            for product in entry.get("return_products", []):
-                product["return_id"] = return_id
-                return_products_list.append(product)
-        return_products_df = pd.DataFrame(return_products_list)
+        # Разбор groups
+        groups_list = []
+        for person in data:
+            person_id = person.get("person_id")
+            for group in person.get("groups", []):
+                group["person_id"] = person_id
+                groups_list.append(group)
+        groups_df = pd.DataFrame(groups_list)
 
-        details_list = []
-        for product in return_products_list:
-            product_id = product.get("product_unit_id")
-            return_id = product.get("return_id")
-            for detail in product.get("details", []):
-                detail["product_id"] = product_id
-                detail["return_id"] = return_id
-                details_list.append(detail)
-        details_df = pd.DataFrame(details_list)
+        # Разбор rooms
+        rooms_list = []
+        for person in data:
+            person_id = person.get("person_id")
+            for room in person.get("rooms", []):
+                room["person_id"] = person_id
+                rooms_list.append(room)
+        rooms_df = pd.DataFrame(rooms_list)
 
-        print(f"✅ Получено: {len(return_df)} возвратов, {len(return_products_df)} товаров, {len(details_df)} деталей")
+        print(f"✅ Получено: {len(main_df)} персон, {len(groups_df)} групп, {len(rooms_df)} комнат")
 
         df_dict = {
             name: df for name, df in {
-                "natural_person_return": return_df,
-                "natural_person_returnproducts": return_products_df,
-                "natural_person_details": details_df
+                "natural_person": main_df,
+                "natural_person_groups": groups_df,
+                "natural_person_rooms": rooms_df
             }.items() if not df.empty and not df.columns.empty
         }
 
@@ -71,6 +72,7 @@ def fetch_and_flatten(data_url):
     except Exception as e:
         print(f"❌ Ошибка при загрузке: {e}")
         return None
+
 
 
 def upload_to_sql(df_dict):

@@ -36,33 +36,23 @@ def fetch_and_flatten(data_url):
         elif not isinstance(data, list):
             raise ValueError("❌ Формат ответа неизвестен")
 
-        return_df = pd.json_normalize(data, sep="_", max_level=1)
+        main_df = pd.json_normalize(data, sep="_", max_level=1)
 
-        return_products_list = []
-        for entry in data:
-            return_id = entry.get("deal_id") or entry.get("movement_id") or entry.get("visit_id") or entry.get("id")
-            for product in entry.get("return_products", []):
-                product["return_id"] = return_id
-                return_products_list.append(product)
-        return_products_df = pd.DataFrame(return_products_list)
+        # Вложенные person_group_types
+        types_list = []
+        for group in data:
+            group_id = group.get("person_group_id")
+            for ptype in group.get("person_group_types", []):
+                ptype["person_group_id"] = group_id
+                types_list.append(ptype)
+        types_df = pd.DataFrame(types_list)
 
-        details_list = []
-        for product in return_products_list:
-            product_id = product.get("product_unit_id")
-            return_id = product.get("return_id")
-            for detail in product.get("details", []):
-                detail["product_id"] = product_id
-                detail["return_id"] = return_id
-                details_list.append(detail)
-        details_df = pd.DataFrame(details_list)
-
-        print(f"✅ Получено: {len(return_df)} возвратов, {len(return_products_df)} товаров, {len(details_df)} деталей")
+        print(f"✅ Получено: {len(main_df)} групп, {len(types_df)} типов")
 
         df_dict = {
             name: df for name, df in {
-                "person_group_return": return_df,
-                "person_group_returnproducts": return_products_df,
-                "person_group_details": details_df
+                "person_group": main_df,
+                "person_group_types": types_df
             }.items() if not df.empty and not df.columns.empty
         }
 
@@ -71,6 +61,7 @@ def fetch_and_flatten(data_url):
     except Exception as e:
         print(f"❌ Ошибка при загрузке: {e}")
         return None
+
 
 
 def upload_to_sql(df_dict):
